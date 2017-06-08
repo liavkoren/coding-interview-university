@@ -1,8 +1,11 @@
-# from anytree import Node, RenderTree
-
 '''
-Addressing scheme using zero indexing is for level i, items range from
-[2^i-1, 2^i-2] inclusive.
+Based on Skiena's discussion of Heaps in Algorithm Design Manual, pp 108 - 118.
+
+Skiena uses 1-based indexing. 0-based indexing is: for level i, items range from
+[2^i-1, 2^i-2].
+
+Also uses the lovely anytree library to provide ascii tree printing. Still need
+to debug rendering to dot file.
 '''
 from anytree import (
     Node,
@@ -12,11 +15,16 @@ from anytree.dotexport import RenderTreeGraph
 from anytree.render import ContStyle
 
 
+class HeapError(Exception):
+    pass
+
+
 class Heap:
     """ It's a min heap. Takes a list of stuff. """
     def __init__(self, *args):
         self.items = []
-        self.pprint = []
+        for item in args:
+            self.insert(item)
 
     def __str__(self):
         if not self.items:
@@ -48,11 +56,23 @@ class Heap:
 
     def _bubble_up(self, index):
         parent_index = self.parent(index)
-        if not parent_index:
+        if parent_index is None:
             return
         if self.items[parent_index] > self.items[index]:
             self._swap(index, parent_index)
             self._bubble_up(parent_index)
+
+    def _bubble_down(self, item_index):
+        youngest_child_index = self.youngest_child(item_index)
+        min_index = item_index
+        max_heap_index = self.size() - 1
+        for j in [0, 1]:
+            if youngest_child_index + j <= max_heap_index:
+                if self.items[min_index] > self.items[youngest_child_index + j]:
+                    min_index = youngest_child_index + j
+        if min_index != item_index:
+            self._swap(item_index, min_index)
+            self._bubble_down(min_index)
 
     def _heapify(self):
         # create a heap from an array of elements, needed for heap_sort
@@ -63,8 +83,13 @@ class Heap:
         self._bubble_up(self.size()-1)
 
     def extract(self):
-        # returns the max item, removing it
-        pass
+        if self.size() > 0:
+            self._swap(0, self.size()-1)
+            out = self.items.pop()
+            self._bubble_down(0)
+            return out
+        else:
+            raise HeapError('Heap is empty')
 
     def parent(self, n):
         if n == 0:
