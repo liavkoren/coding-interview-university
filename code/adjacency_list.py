@@ -5,6 +5,10 @@ import attr
 from attr.validators import instance_of
 
 
+class GraphException(Exception):
+    pass
+
+
 @attr.s
 class EdgeNode:
     """
@@ -131,13 +135,13 @@ BFS(graph2, 0)
 print('----------------------')
 
 
-def process_edge(x, y, parent_list):
-    print(f'    Processing edge ({v:02}, {node.y:02})')
+def find_cycles(search_state, x, y):
+    print(f'    Processing edge ({x:02}, {y:02})')
     # Why do I need to do this check aginst (x,y) / (y, x) when Skiena doesn't include it?
-    if parent_list[x] == y or parent_list[y] == x:
+    if search_state.node_parents[x] == y or search_state.node_parents[y] == x:
         return
     print(f'    Found cycle from {x} to {y}: ')
-    find_path(x, y, parent_list)
+    find_path(x, y, search_state.node_parents)
 
 
 def find_path(src, dst, parent_list):
@@ -150,59 +154,109 @@ def find_path(src, dst, parent_list):
         print(f'\t{parent_list[src]}')
 
 
+class NodeStates(Enum):
+    undiscovered = 0
+    discovered = 1
+    processed = 2
+
+
+class EdgeTypes(Enum):
+    tree = 0
+    back = 1
+    forward = 2
+    cross = 3
+
+
+def edge_classification(x, y, search_state):
+    if search_state.node_parents[y] == x:
+        return EdgeTypes.tree
+    if search_state.node_states[y] is NodeStates.discovered:
+        return EdgeTypes.back
+    if search_state.node_states[y] is NodeStates.processed and entry_times[y] > entry_times[x]:
+        return EdgeTypes.forward
+    if search_state.node_states[y] is NodeStates.processed and entry_times[y] < entry_times[x]:
+        return EdgeTypes.cross
+    raise GraphException('Unclassifiable edge.')
+
+
+@attr.s
+class SearchState:
+    """ Keeps track of all the book keeping while doing a graph traversal. """
+    node_states = attr.ib(default=None)
+    node_parents = attr.ib(default=None)
+    entry_times = attr.ib(default=None)
+    exit_times = attr.ib(default=None)
+    reachable_ancestors = attr.ib(default=None)
+    out_degrees = attr.ib(default=None)
+    graph = attr.ib(instance_of(Graph))
+
+    def __str__(self):
+        stats = [
+            f'Parents: {self.node_parents}',
+            f'Entry times: {self.entry_times}',
+            f'Exit times: {self.exit_times}',
+            f'Earliest ancestors: {self.reachable_ancestors}',
+            f'Out degrees: {self.out_degrees}',
+        ]
+        return '\n'.join(stats)
+
+    def __attrs_post_init__(self):
+        self.node_states = [NodeStates.undiscovered] * self.graph.nnodes
+        self.node_parents = [None] * self.graph.nnodes
+        self.entry_times = [0] * self.graph.nnodes
+        self.exit_times = [0] * self.graph.nnodes
+        self.out_degrees = [0] * self.graph.nnodes
+        self.reachable_ancestors = [0] * self.graph.nnodes
+
+
 def DFS(graph, start, process_node_early, process_node_late, process_edge):
-    class States(Enum):
-        undiscovered = 0
-        discovered = 1
-        processed = 2
-
-    def edge_classification(x, y):
-        pass
-
-    if not hasattr(graph, 'reachable_ancestors'):
-        graph.reachable_ancestors = [None] * graph.nnodes
-    if not hasattr(graph, 'out_degrees'):
-        graph.out_degrees = [None] * graph.nnodes
-
     time = 0
-    node_states = [States.undiscovered] * graph.nnodes
-    node_parents = [None] * graph.nnodes
-    entry_times = [0] * graph.nnodes
-    exit_times = [0] * graph.nnodes
+    search_state = SearchState(graph=graph)
 
     def recurse(v):
         nonlocal time
         time += 1
-        node_states[v] = States.discovered
-        entry_times[v] = time
-        process_node_early(v)
+        search_state.node_states[v] = NodeStates.discovered
+        search_state.entry_times[v] = time
+        process_node_early(search_state, v)
         adjacent_nodes = graph.nodes[v]
         for node in adjacent_nodes:
-            if node_states[node.y] is States.undiscovered:
-                node_parents[node.y] = v
-                process_edge(v, node.y, node_parents)
+            if search_state.node_states[node.y] is NodeStates.undiscovered:
+                search_state.node_parents[node.y] = v
+                process_edge(search_state, v, node.y)
                 recurse(node.y)
-            elif node_states[node.y] is States.discovered or graph.directed:
-                process_edge(v, node.y, node_parents)
-        process_node_late(v)
+            elif search_state.node_states[node.y] is NodeStates.discovered or graph.directed:
+                process_edge(search_state, v, node.y)
+        process_node_late(search_state, v)
         time += 1
-        exit_times[v] = time
-        node_states[v] = States.processed
+        search_state.exit_times[v] = time
+        search_state.node_states[v] = NodeStates.processed
 
     recurse(start)
-    print(f'Parents: {node_parents}\nEntry times: {entry_times}\nExit times{exit_times}')
+    print(f'Search state: {search_state}')
 
 
-def process_node_early(index):
-    print(f'Entering node #{v:02}')
+def process_node_early(search_state, index):
+    print(f'Entering node #{index:02}')
+    search_state.reachable_ancestors[index] = index
 
 
-def process_node_late(index):
-    print(f'Leaving node #{v:02}')
-    graph.reachable_ancestors[index] = index
+def process_node_late(search_state, index):
+    print(f'Leaving node #{index:02}')
 
 
-DFS(graph2, 0, process_node_early, process_node_late, process_edge)
+def find_ancestors(search_state, x, y):
+    edge_class = edge_classification(x, y, search_state)
+    if edge_class is EdgeTypes.tree:
+        search_state.out_degrees[x] += 1  # <--
+    if edge_class is EdgeTypes.back and search_state.node_parents[x] != y:
+        ancestor_index = search_state.reachable_ancestors[x]
+        found_older_ancestor = search_state.entry_times[y] < search_state.entry_times[ancestor_index]
+        if found_older_ancestor:
+            search_state.reachable_ancestors[x] = y
+
+
+DFS(graph2, 0, process_node_early, process_node_late, find_ancestors)
 
 # ----------------------------
 # A more literal translation of Skiena's DFS:
@@ -235,11 +289,11 @@ def DFS2(graph, v):
         if discovered[y] is False:
             parents[y] = v
             print(f'Processing ({v}, {y})')
-            process_edge(v, y, parents)
+            # process_edge(v, y, parents)
             DFS2(graph, y)
         elif not processed[y] or graph.directed:
             print(f'Processing ({v}, {y})')
-            process_edge(v, y, parents)
+            # process_edge(v, y, parents)
         p = p.next
     print(f'Exiting {v}')
     time += 1
