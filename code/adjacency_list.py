@@ -14,7 +14,6 @@ class EdgeNode:
     """
     y = attr.ib(instance_of(int))
     weight = attr.ib(default=1)
-    # edges = attr.ib(default=attr.Factory(list), repr=False)
     next = attr.ib(default=None)
 
     def __str__(self):
@@ -132,11 +131,38 @@ BFS(graph2, 0)
 print('----------------------')
 
 
-def DFS(graph, start):
+def process_edge(x, y, parent_list):
+    print(f'    Processing edge ({v:02}, {node.y:02})')
+    # Why do I need to do this check aginst (x,y) / (y, x) when Skiena doesn't include it?
+    if parent_list[x] == y or parent_list[y] == x:
+        return
+    print(f'    Found cycle from {x} to {y}: ')
+    find_path(x, y, parent_list)
+
+
+def find_path(src, dst, parent_list):
+    if src == dst or dst is None:
+        pass
+    else:
+        # Do not ignore the order of recursive calls w/r/t other code! Code after
+        # a recursive call is deferred.
+        find_path(parent_list[src], dst, parent_list)
+        print(f'\t{parent_list[src]}')
+
+
+def DFS(graph, start, process_node_early, process_node_late, process_edge):
     class States(Enum):
         undiscovered = 0
         discovered = 1
         processed = 2
+
+    def edge_classification(x, y):
+        pass
+
+    if not hasattr(graph, 'reachable_ancestors'):
+        graph.reachable_ancestors = [None] * graph.nnodes
+    if not hasattr(graph, 'out_degrees'):
+        graph.out_degrees = [None] * graph.nnodes
 
     time = 0
     node_states = [States.undiscovered] * graph.nnodes
@@ -149,17 +175,16 @@ def DFS(graph, start):
         time += 1
         node_states[v] = States.discovered
         entry_times[v] = time
-        print(f'Processing node #{v:02}')
+        process_node_early(v)
         adjacent_nodes = graph.nodes[v]
         for node in adjacent_nodes:
             if node_states[node.y] is States.undiscovered:
                 node_parents[node.y] = v
-                print(f'    Processing edge ({v:02}, {node.y:02})')
+                process_edge(v, node.y, node_parents)
                 recurse(node.y)
-
             elif node_states[node.y] is States.discovered or graph.directed:
-                print(f'   Processing edge ({v:02}, {node.y:02})')
-        print(f'Leaving node #{v:02}')
+                process_edge(v, node.y, node_parents)
+        process_node_late(v)
         time += 1
         exit_times[v] = time
         node_states[v] = States.processed
@@ -168,11 +193,58 @@ def DFS(graph, start):
     print(f'Parents: {node_parents}\nEntry times: {entry_times}\nExit times{exit_times}')
 
 
-DFS(graph2, 0)
+def process_node_early(index):
+    print(f'Entering node #{v:02}')
 
 
-'''
-Other important algos:
-- count components
-- two-coloring/n-coloring
-'''
+def process_node_late(index):
+    print(f'Leaving node #{v:02}')
+    graph.reachable_ancestors[index] = index
+
+
+DFS(graph2, 0, process_node_early, process_node_late, process_edge)
+
+# ----------------------------
+# A more literal translation of Skiena's DFS:
+
+
+discovered = [False] * graph2.nnodes
+processed = [False] * graph2.nnodes
+entry_times = [0] * graph2.nnodes
+exit_times = [0] * graph2.nnodes
+parents = [None] * graph2.nnodes
+time = 0
+
+
+def DFS2(graph, v):
+    global discovered
+    global processed
+    global entry_times
+    global exit_times
+    global parents
+    global time
+
+    p = graph.nodes[v]
+    discovered[v] = True
+    time += 1
+    entry_times[v] = time
+    print(f'Entering {v}')
+
+    while p:
+        y = p.y
+        if discovered[y] is False:
+            parents[y] = v
+            print(f'Processing ({v}, {y})')
+            process_edge(v, y, parents)
+            DFS2(graph, y)
+        elif not processed[y] or graph.directed:
+            print(f'Processing ({v}, {y})')
+            process_edge(v, y, parents)
+        p = p.next
+    print(f'Exiting {v}')
+    time += 1
+    processed[v] = True
+
+
+# print('----')
+# DFS2(graph2, 0)
