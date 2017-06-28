@@ -40,7 +40,7 @@ class EdgeNode:
 @attr.s
 class Graph:
     nodes = attr.ib(default=attr.Factory(list))
-    directed = attr.ib(instance_of(bool))
+    directed = attr.ib(default=False)
     nedges = attr.ib(0)
 
     def __str__(self):
@@ -56,15 +56,23 @@ class Graph:
     def nnodes(self):
         return len(self.nodes)
 
-    def add_edge(self, x, y, weight=1, directed=False):
-        while max(x, y) + 1 > len(self.nodes):
-            self.nodes.append(None)
-        edgenode = EdgeNode(y=y, weight=weight, next=self.nodes[x])
-        self.nodes[x] = edgenode
-        if directed:
-            self.nedges += 1
-        else:
-            self.add_edge(y, x, weight, directed=True)
+    def add_edge(self, x, y, weight=1):
+        # Lesson:
+        # We need this inner because we can't cleanly recurse on an instance's
+        # method while using an instance attribute as the bail-out condition,
+        # and also leave the attribute immutable. Ie: 'directed' gets toggled
+        # for the two calls to inner, but self.directed should be immutable
+        # for the instance.
+        def inner(x, y, weight, directed=False):
+            while max(x, y) + 1 > len(self.nodes):
+                self.nodes.append(None)
+            edgenode = EdgeNode(y=y, weight=weight, next=self.nodes[x])
+            self.nodes[x] = edgenode
+            if directed:
+                self.nedges += 1
+            else:
+                inner(y, x, weight, directed=True)
+        inner(x, y, weight=1, directed=self.directed)
 
 
 graph = Graph(directed=False)
@@ -172,9 +180,9 @@ def edge_classification(x, y, search_state):
         return EdgeTypes.tree
     if search_state.node_states[y] is NodeStates.discovered:
         return EdgeTypes.back
-    if search_state.node_states[y] is NodeStates.processed and entry_times[y] > entry_times[x]:
+    if search_state.node_states[y] is NodeStates.processed and search_state.entry_times[y] > search_state.entry_times[x]:
         return EdgeTypes.forward
-    if search_state.node_states[y] is NodeStates.processed and entry_times[y] < entry_times[x]:
+    if search_state.node_states[y] is NodeStates.processed and search_state.entry_times[y] < search_state.entry_times[x]:
         return EdgeTypes.cross
     raise GraphException('Unclassifiable edge.')
 
@@ -192,11 +200,11 @@ class SearchState:
 
     def __str__(self):
         stats = [
-            f'Parents: {self.node_parents}',
-            f'Entry times: {self.entry_times}',
-            f'Exit times: {self.exit_times}',
-            f'Earliest ancestors: {self.reachable_ancestors}',
-            f'Out degrees: {self.out_degrees}',
+            f'\tParents: {self.node_parents}',
+            f'\tEntry times: {self.entry_times}',
+            f'\tExit times: {self.exit_times}',
+            f'\tEarliest ancestors: {self.reachable_ancestors}',
+            f'\tOut degrees: {self.out_degrees}',
         ]
         return '\n'.join(stats)
 
@@ -220,10 +228,11 @@ def DFS(graph, start, process_node_early, process_node_late, process_edge):
         search_state.entry_times[v] = time
         process_node_early(search_state, v)
         adjacent_nodes = graph.nodes[v]
+        # Needs to handle disconnected singletons
         for node in adjacent_nodes:
             if search_state.node_states[node.y] is NodeStates.undiscovered:
                 search_state.node_parents[node.y] = v
-                process_edge(search_state, v, node.y)
+                process_edge(search_state, v, node.y)  # <-- falls over at edge (1, 4)
                 recurse(node.y)
             elif search_state.node_states[node.y] is NodeStates.discovered or graph.directed:
                 process_edge(search_state, v, node.y)
@@ -233,7 +242,7 @@ def DFS(graph, start, process_node_early, process_node_late, process_edge):
         search_state.node_states[v] = NodeStates.processed
 
     recurse(start)
-    print(f'Search state: {search_state}')
+    print(f'Search state:\n{search_state}')
 
 
 def process_node_early(search_state, index):
@@ -242,6 +251,34 @@ def process_node_early(search_state, index):
 
 
 def process_node_late(search_state, index):
+    # Are we at the root?
+    if search_state.node_parents[index] is None:
+        if search_state.out_degrees[index] > 1:
+            print(f'Root articulation vertex: {index}')
+            return
+    # is the parent the root?
+    root = search_state.node_parents[search_state.node_parents[index]] is None
+    if search_state.reachable_ancestors[index] == search_state.node_parents[index] and not root:
+        print(f'Parent articulation vertex: {search_state.node_parents[index]} for {index}')
+        return
+
+    if search_state.reachable_ancestors[index] == index:
+        print(f'Bridge articulation vertex: {search_state.node_parents[index]} for {index}')
+        # check that it's not a leaf:
+        if search_state.out_degrees[index] > 0:
+            print(f'Bridge articulation vertex: {index}')
+            return
+
+    # If the child is roped back up to a higher part of the graph than its parent
+    # we can bubble that older ancestor up to the parent:
+    node_ancestor_index = search_state.reachable_ancestors[index]
+    node_entry_time = search_state.entry_times[node_ancestor_index]
+
+    parent_ancestor_index = search_state.reachable_ancestors[search_state.node_parents[index]]
+    parent_entry_time = search_state.entry_times[parent_ancestor_index]
+    if node_entry_time < parent_entry_time:
+        parent_index = search_state.node_parents[index]
+        search_state.reachable_ancestors[parent_index] = node_ancestor_index
     print(f'Leaving node #{index:02}')
 
 
@@ -256,7 +293,19 @@ def find_ancestors(search_state, x, y):
             search_state.reachable_ancestors[x] = y
 
 
-DFS(graph2, 0, process_node_early, process_node_late, find_ancestors)
+# DFS(graph2, 0, process_node_early, process_node_late, find_ancestors)
+
+articulated_graph = Graph()
+articulated_graph.add_edge(0, 5)
+articulated_graph.add_edge(0, 1)
+articulated_graph.add_edge(4, 1)
+articulated_graph.add_edge(1, 2)
+articulated_graph.add_edge(2, 3)
+articulated_graph.add_edge(3, 4)
+
+print(articulated_graph)
+print('-----')
+DFS(articulated_graph, 0, process_node_early, process_node_late, find_ancestors)
 
 # ----------------------------
 # A more literal translation of Skiena's DFS:
@@ -302,3 +351,24 @@ def DFS2(graph, v):
 
 # print('----')
 # DFS2(graph2, 0)
+
+
+# --------
+# DAGs:
+
+dag = Graph(directed=True)
+dag.add_edge(0, 1)
+dag.add_edge(0, 4)
+dag.add_edge(1, 2)
+dag.add_edge(1, 3)
+dag.add_edge(2, 3)
+dag.add_edge(2, 6)
+dag.add_edge(3, 4)
+dag.add_edge(3, 5)
+dag.add_edge(4, 5)
+dag.add_edge(5, 6)
+
+assert dag.nnodes == 7
+assert dag.nedges == 10
+print('---')
+print(dag)
