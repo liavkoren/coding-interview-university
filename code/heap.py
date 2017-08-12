@@ -1,4 +1,4 @@
-'''
+"""
 Based on Skiena's discussion of Heaps in Algorithm Design Manual, pp 108 - 118.
 
 Skiena uses 1-based indexing. 0-based indexing is: for level i, items range from
@@ -10,14 +10,13 @@ Skiena uses 1-based indexing. 0-based indexing is: for level i, items range from
 
 Also uses the lovely anytree library to provide ascii tree printing. Still need
 to debug rendering to dot file.
-'''
+"""
 import reprlib
 
 from anytree import (
     Node,
     RenderTree,
 )
-from anytree.dotexport import RenderTreeGraph
 from anytree.render import ContStyle
 
 
